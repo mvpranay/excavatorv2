@@ -123,3 +123,23 @@ bool KeyFrameMangager::loadKeyFramesFromFile(const string &filename) {
 
     return true;
 }
+
+sceneKeyFrame interpolateSceneKeyFrames(const sceneKeyFrame & f1, const sceneKeyFrame & f2, float t) {
+    sceneKeyFrame result;
+
+    result.frame_num = int(Lerp(float(f1.frame_num), float(f2.frame_num), t));
+    result.cameraPos = lerpVec3(f1.cameraPos, f2.cameraPos, t);
+    result.cameraTarget = lerpVec3(f1.cameraTarget, f2.cameraTarget, t);
+    result.light1On = (t < 0.5f) ? f1.light1On : f2.light1On;
+    result.light2On = (t < 0.5f) ? f1.light2On : f2.light2On;
+    result.excavatorLightsOn = (t < 0.5f) ? f1.excavatorLightsOn : f2.excavatorLightsOn;
+    result.excavatorPos = lerpVec3(f1.excavatorPos, f2.excavatorPos, t);
+    result.cabinRotation = Lerp(f1.cabinRotation, f2.cabinRotation, t);
+    result.boomAngle = Lerp(f1.boomAngle, f2.boomAngle, t);
+    result.stickAngle = Lerp(f1.stickAngle, f2.stickAngle, t);
+    result.bucketAngle = Lerp(f1.bucketAngle, f2.bucketAngle, t);
+    result.boomRoll = Lerp(f1.boomRoll, f2.boomRoll, t);
+    result.stickTwist = Lerp(f1.stickTwist, f2.stickTwist, t);
+
+    return result;
+}

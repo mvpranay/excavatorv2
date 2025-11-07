@@ -25,6 +25,8 @@ struct sceneKeyFrame{
     float stickTwist;
 };
 
+sceneKeyFrame interpolateSceneKeyFrames(const sceneKeyFrame & f1, const sceneKeyFrame & f2, float t);
+
 class KeyFrameMangager {
 public:
     std::vector<cameraKeyPoint> cameraKeyPoints;
