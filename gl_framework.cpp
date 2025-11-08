@@ -4,6 +4,7 @@
 #include <string>
 #include <iostream>
 #include "hierarchy_node.hpp"
+#include "keyframe.hpp"
 
 using namespace std;
 
@@ -12,8 +13,14 @@ extern bool light1On;
 extern bool light2On;
 extern bool excavatorLightsOn;
 
+extern sceneKeyFrame current_scene;
+
 // Camera toggle
 extern int currentCamera;
+extern bool displayCameraPath;
+
+extern KeyFrameMangager keyFrameManager;
+extern cameraKeyPoint current_camera;
 
 namespace csX75
 {
@@ -157,15 +164,46 @@ namespace csX75
 
         //! Camera toggle
         case GLFW_KEY_C:
-            currentCamera = (currentCamera == 1) ? 2 : 1;
+            if (mods & GLFW_MOD_SHIFT){
+                if (keyFrameManager.saveCameraKeyFramesToFile("camera.txt")){
+                    cout << "Camera keyframes saved to camera.txt" << endl;
+                }
+                else{
+                    cout << "Failed to save camera keyframes." << endl;
+                }
+            }
+            else{
+                currentCamera = (currentCamera == 1) ? 2 : 1;
+                break;
+            }
+
+        //! save current camera parameters in vector
+        case GLFW_KEY_X: {
+            keyFrameManager.cameraKeyPoints.push_back(current_camera);
+            cout << "Pushed camera keyframe #" << keyFrameManager.cameraKeyPoints.size() << " to camera path." << endl;
             break;
+        }
+
+        // to display camera path
+        case GLFW_KEY_V: {
+            int num = keyFrameManager.cameraKeyPoints.size();
+            if (num >= 4){
+                displayCameraPath = !displayCameraPath;
+                cout << "Camera path display toggled to " << (displayCameraPath ? "ON" : "OFF") << "." << endl;
+            }
+            break;
+        }
+
+        // save current scene parameters in vector
+        case GLFW_KEY_R: {
+            keyFrameManager.sceneKeyFrames.push_back(current_scene);
+            cout << "Pushed scene keyframe #" << keyFrameManager.sceneKeyFrames.size() << "." << endl;
+            break;
+        }
 
         default:
             break;
     }
-}
-
-};  
-  
-
+  }
+};
 

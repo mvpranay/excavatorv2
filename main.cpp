@@ -14,6 +14,11 @@
 // for hierarchical model
 #include "hierarchy_node.hpp"
 
+// for keyframes
+#include "keyframe.hpp"
+
+#include "animation.hpp"
+
 // for texture
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
@@ -29,6 +34,22 @@ const int HEIGHT = 720;
 glm::vec3 cameraPos1 = glm::vec3(0.0f, 4.5f, 12.0f);
 glm::vec3 cameraTarget1 = glm::vec3(0.0f, 2.0f, 0.0f);
 int currentCamera = 1; // 1 for static, 2 for following
+
+glm::vec3 cameraFront1 = glm::vec3(0.0f, 0.0f, -1.0f);
+glm::vec3 cameraUp1    = glm::vec3(0.0f, 1.0f, 0.0f);
+float pitch = 0.0f, yaw = -90.0f;
+
+cameraKeyPoint current_camera = cameraKeyPoint{cameraPos1, cameraTarget1, 10};
+bool displayCameraPath = false;
+
+sceneKeyFrame current_scene;
+
+// key frame manager
+KeyFrameMangager keyFrameManager;
+AnimationSystem animation_system(30);
+
+bool animating = false;
+bool loaded = false;
 
 // excavator parts
 HNode * base, * cabin, * boom, * stick, * bucket; 
@@ -451,6 +472,67 @@ void drawExcavator(GLuint shaderProgram) {
     }
 }
 
+void drawCameraPath(GLuint shaderProgram) {
+    glm::mat4 model = glm::mat4(1.0f);
+    glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "model"), 1, GL_FALSE, glm::value_ptr(model));
+    glUniform1i(glGetUniformLocation(shaderProgram, "useTexture"), 0);
+
+    // draw control points
+    std::vector<glm::vec3> controlPoints;
+    for (auto & p : keyFrameManager.cameraKeyPoints)
+        controlPoints.push_back(p.cameraPos);
+
+    if (!controlPoints.empty()) {
+        GLuint pointVAO, pointVBO;
+        glGenVertexArrays(1, &pointVAO);
+        glGenBuffers(1, &pointVBO);
+        
+        glBindVertexArray(pointVAO);
+        glBindBuffer(GL_ARRAY_BUFFER, pointVBO);
+        glBufferData(GL_ARRAY_BUFFER, controlPoints.size() * sizeof(glm::vec3), 
+                     controlPoints.data(), GL_STATIC_DRAW);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(glm::vec3), (void*)0);
+        glEnableVertexAttribArray(0);
+
+        glUniform3f(glGetUniformLocation(shaderProgram, "objectColor"), 1.0f, 0.0f, 0.0f);
+        glPointSize(8.0f);
+        glDrawArrays(GL_POINTS, 0, controlPoints.size());
+
+        // draw control polygon
+        glUniform3f(glGetUniformLocation(shaderProgram, "objectColor"), 1.0f, 0.8f, 0.0f);
+        glDrawArrays(GL_LINE_STRIP, 0, controlPoints.size());
+
+        glDeleteVertexArrays(1, &pointVAO);
+        glDeleteBuffers(1, &pointVBO);
+    }
+
+    // draw bezier curve
+    std::vector<glm::vec3> curvePoints;
+    for (float t = 0.0f; t <= 1.0f; t += 0.01f) {
+        glm::vec3 pos = getBezierPoint(keyFrameManager.getCameraPositions(), t);
+        curvePoints.push_back(pos);
+    }
+
+    if (!curvePoints.empty()) {
+        GLuint curveVAO, curveVBO;
+        glGenVertexArrays(1, &curveVAO);
+        glGenBuffers(1, &curveVBO);
+        
+        glBindVertexArray(curveVAO);
+        glBindBuffer(GL_ARRAY_BUFFER, curveVBO);
+        glBufferData(GL_ARRAY_BUFFER, curvePoints.size() * sizeof(glm::vec3), 
+                     curvePoints.data(), GL_STATIC_DRAW);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(glm::vec3), (void*)0);
+        glEnableVertexAttribArray(0);
+
+        glUniform3f(glGetUniformLocation(shaderProgram, "objectColor"), 1.0f, 1.0f, 1.0f);
+        glDrawArrays(GL_LINE_STRIP, 0, curvePoints.size());
+
+        glDeleteVertexArrays(1, &curveVAO);
+        glDeleteBuffers(1, &curveVBO);
+    }
+}
+
 // Draw scene
 void drawScene(GLuint shaderProgram, GLuint cubeVAO, GLuint cylinderVAO) {
     glm::mat4 model;
@@ -564,13 +646,21 @@ void drawScene(GLuint shaderProgram, GLuint cubeVAO, GLuint cylinderVAO) {
     glUniform3f(glGetUniformLocation(shaderProgram, "objectColor"), 1.0f, 0.9f, 0.6f);
     glUniform1i(glGetUniformLocation(shaderProgram, "useTexture"), 0); // Disable texturing
     glDrawArrays(GL_TRIANGLES, 0, 36);
+
+    // camera trajectory
+    if (displayCameraPath){
+        glDisable(GL_DEPTH_TEST); // draw on top
+        drawCameraPath(shaderProgram);
+        glEnable(GL_DEPTH_TEST);
+    }
 }
+
 
 // Input handling, add keys for stick twist and boom
 void processInput(GLFWwindow* window, float deltaTime) {    
     // movement for excavator
     float moveSpeed = 2.0f * deltaTime;
-    float rotSpeed = 20.0f * deltaTime;
+    float rotSpeed = 40.0f * deltaTime;
 
     if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) excavatorZ -= moveSpeed;
     if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) excavatorZ += moveSpeed;
@@ -618,13 +708,75 @@ void processInput(GLFWwindow* window, float deltaTime) {
     boom->rz = boomRoll;
     boom->update_matrices();
 
-    // camera 1 controls with arrow keys
-    float cameraSpeed = 3.0f * deltaTime;
+    // float cameraSpeed = 3.0f * deltaTime;
     if (currentCamera == 1) {
-        if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS) cameraPos1.x -= cameraSpeed;
-        if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) cameraPos1.x += cameraSpeed;
-        if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS) cameraPos1.y += cameraSpeed;
-        if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS) cameraPos1.y -= cameraSpeed;
+        // directions
+        glm::vec3 forward = glm::normalize(cameraTarget1 - cameraPos1);
+        glm::vec3 right   = glm::normalize(glm::cross(forward, glm::vec3(0.0f, 1.0f, 0.0f))); // world-up
+
+        // translation (moves both eye and target)
+        if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS) {
+            glm::vec3 move = moveSpeed * forward;
+            cameraPos1 += move;
+            cameraTarget1 += move;
+        }
+        if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS) {
+            glm::vec3 move = -moveSpeed * forward;
+            cameraPos1 += move;
+            cameraTarget1 += move;
+        }
+        if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS) {
+            glm::vec3 move = -moveSpeed * right;
+            cameraPos1 += move;
+            cameraTarget1 += move;
+        }
+        if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) {
+            glm::vec3 move = moveSpeed * right;
+            cameraPos1 += move;
+            cameraTarget1 += move;
+        }
+        if (glfwGetKey(window, GLFW_KEY_COMMA) == GLFW_PRESS) {
+            glm::vec3 move = glm::vec3(0.0f, moveSpeed, 0.0f); // up
+            cameraPos1 += move;
+            cameraTarget1 += move;
+        }
+        if (glfwGetKey(window, GLFW_KEY_PERIOD) == GLFW_PRESS) {
+            glm::vec3 move = glm::vec3(0.0f, -moveSpeed, 0.0f); // down
+            cameraPos1 += move;
+            cameraTarget1 += move;
+        }
+
+        // rotation
+        float rot_speed = 20.0f * deltaTime;
+        if (glfwGetKey(window, GLFW_KEY_7) == GLFW_PRESS) pitch += rot_speed;
+        if (glfwGetKey(window, GLFW_KEY_8) == GLFW_PRESS) pitch -= rot_speed;
+        if (glfwGetKey(window, GLFW_KEY_9) == GLFW_PRESS) yaw   -= rot_speed;
+        if (glfwGetKey(window, GLFW_KEY_0) == GLFW_PRESS) yaw   += rot_speed;
+
+        // compute new look direction
+        glm::vec3 direction;
+        direction.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
+        direction.y = sin(glm::radians(pitch));
+        direction.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
+
+        // update lookAt
+        glm::vec3 newFront = glm::normalize(direction);
+        float dist = glm::length(cameraTarget1 - cameraPos1);
+        cameraTarget1 = cameraPos1 + newFront * dist;
+    }
+
+    if (!animating){
+    // update current_camera
+    current_camera = cameraKeyPoint{cameraPos1, cameraTarget1, 10};
+
+    // update current_scene
+    current_scene = sceneKeyFrame{
+                                10, cameraPos1, cameraTarget1,
+                                light1On, light2On, excavatorLightsOn,
+                                glm::vec3(excavatorX, 0, excavatorZ),
+                                cabinRotation, boomAngle, stickAngle,
+                                bucketAngle, boomRoll, stickTwist
+                            };
     }
 }
 
@@ -745,6 +897,41 @@ int main() {
         glClearColor(0.05f, 0.05f, 0.08f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+        // if L key is pressed, then we need to load the keyframe files
+        if (!loaded && glfwGetKey(window, GLFW_KEY_L) == GLFW_PRESS) {
+            animation_system.loadFromFile("scene.key");
+
+            animation_system.generateInterpolatedFrames();
+            loaded = true;
+        }
+
+        // if P key is pressed, we need to start the playback
+        if (loaded && !animating && glfwGetKey(window, GLFW_KEY_P) == GLFW_PRESS){
+            animating = true;
+            animation_system.startPlayback();
+        }
+
+        if (animating){
+            // obtain values from the current frame
+            const sceneKeyFrame * skf = animation_system.getCurrentFrame();
+            if (skf != nullptr){
+                // load values from the scene key frame
+                cameraPos1 = skf->cameraPos;
+                cameraTarget1 = skf->cameraTarget;
+                light1On = skf->light1On;
+                light2On = skf->light2On;
+                excavatorLightsOn = skf->excavatorLightsOn;
+                excavatorX = skf->excavatorPos.x;
+                excavatorZ = skf->excavatorPos.z;
+                cabinRotation = skf->cabinRotation;
+                boomAngle = skf->boomAngle;
+                stickAngle = skf->stickAngle;
+                bucketAngle = skf->bucketAngle;
+                boomRoll = skf->boomRoll;
+                stickTwist = skf->stickTwist;
+            }
+        }
+
         // Draw scene objects
         drawScene(shaderProgram, cubeVAO, cylinderVAO);
 
@@ -756,6 +943,11 @@ int main() {
 
         // Swap buffers
         glfwSwapBuffers(window);
+
+        // update animation system
+        if (animating){
+            animating = animation_system.update(glfwGetTime());
+        }
     }
 
     // Cleanup (delete VAOs, program)
@@ -765,5 +957,10 @@ int main() {
 
     glfwDestroyWindow(window);
     glfwTerminate();
+
+    // write scene keyframes to file
+    if (!keyFrameManager.sceneKeyFrames.empty())
+        keyFrameManager.saveSceneKeyFramesToFile("scene.key");
+
     return 0;
 }

@@ -3,7 +3,7 @@ CFLAGS = -std=c++11 -Wall
 LDFLAGS = -lGL -lGLEW -lglfw -lm
 
 TARGET = excavator
-SOURCES = main.cpp gl_framework.cpp hierarchy_node.cpp
+SOURCES = main.cpp gl_framework.cpp hierarchy_node.cpp keyframe.cpp
 OBJECTS = $(SOURCES:.cpp=.o)
 
 all: $(TARGET)
